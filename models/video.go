@@ -3,11 +3,11 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	redisClient "fyoukuapi/services/redis"
 	"github.com/astaxie/beego/orm"
 	"github.com/garyburd/redigo/redis"
 	"strconv"
 	"time"
-	redisClient "fyoukuapi/services/redis"
 )
 
 type Video struct {
@@ -126,18 +126,19 @@ func GetVideoEpisodesList(videoId int) (int64, []Episodes, error) {
 	return num, episodes, err
 }
 
-//获取视频剧集列表
+//增加redis缓存 - 获取视频剧集列表
 func RedisGetVideoEpisodesList(videoId int) (int64, []Episodes, error) {
 	var (
 		episodes []Episodes
-		num int64
-		err error
+		num      int64
+		err      error
 	)
-
 	conn := redisClient.PoolConnect()
 	defer conn.Close()
-	redisKey := "video:episodes:videoId:"+strconv.Itoa(videoId)
-	exists,err := redis.Bool(conn.Do("exists",redisKey))
+
+	redisKey := "video:episodes:videoId:" + strconv.Itoa(videoId)
+	//判断rediskey是否已存在
+	exists, err := redis.Bool(conn.Do("exists", redisKey))
 	if exists {
 		num, err = redis.Int64(conn.Do("llen", redisKey))
 		if err == nil {
@@ -150,11 +151,10 @@ func RedisGetVideoEpisodesList(videoId int) (int64, []Episodes, error) {
 				}
 			}
 		}
-	}else {
+	} else {
 		o := orm.NewOrm()
-		var episodes []Episodes
-		num, err = o.Raw("SELECT id,title,add_time,num,play_url,comment FROM video_episodes WHERE video_id=? order by num asc", videoId).QueryRows(&episodes)
-		if err == nil{
+		num, err = o.Raw("SELECT id,title,add_time,num,play_url,comment,aliyun_video_id FROM video_episodes WHERE video_id=? order by num asc", videoId).QueryRows(&episodes)
+		if err == nil {
 			//遍历获取到的信息，把信息json化保存
 			for _, v := range episodes {
 				jsonValue, err := json.Marshal(v)
@@ -167,8 +167,6 @@ func RedisGetVideoEpisodesList(videoId int) (int64, []Episodes, error) {
 		}
 	}
 	return num, episodes, err
-
-
 }
 
 //频道排行榜
@@ -277,7 +275,7 @@ func RedisGetChannelTop(channelId int) (int64, []VideoData, error) {
 		}
 	} else {
 		o := orm.NewOrm()
-		num, err = o.Raw("SELECT id,title,sub_title,img,img1,add_time,episodes_count,is_end FROM video WHERE status=1 AND channel_id=? ORDER BY comment DESC LIMIT 10", channelId).QueryRows(&videos)
+		num, err = o.Raw("SELECT id,title,sub_title,img,img1,add_time,episodes_count,is_end,comment FROM video WHERE status=1 AND channel_id=? ORDER BY comment DESC LIMIT 10", channelId).QueryRows(&videos)
 		if err == nil {
 			//保存redis
 			for _, v := range videos {
